@@ -116,7 +116,7 @@ bb projects usage <project_id>
 bb sessions list
 bb sessions list --q "user_metadata['userId']:'123'"
 bb sessions get <session_id>
-bb sessions create --proxies --advanced-stealth
+bb sessions create --proxies --verified
 bb sessions create --region us-east-1 --timeout 300
 bb sessions create --solve-captchas --context-id ctx_abc --persist
 bb sessions create --body '{"proxies":[{"type":"browserbase","geolocation":{"country":"US"}}]}'
@@ -136,7 +136,7 @@ Use flags for common options instead of building `--body` JSON manually:
 | Flag | Description |
 |------|-------------|
 | `--proxies` | Enable Browserbase proxy |
-| `--advanced-stealth` | Enable advanced stealth mode |
+| `--verified` | Enable a Browserbase Verified browser |
 | `--solve-captchas` / `--no-solve-captchas` | Toggle automatic CAPTCHA solving |
 | `--block-ads` | Enable ad blocking |
 | `--region <region>` | Session region (`us-west-2`, `us-east-1`, `eu-central-1`, `ap-southeast-1`) |

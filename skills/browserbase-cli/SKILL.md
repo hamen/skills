@@ -78,7 +78,7 @@ Use `bb functions invoke --check-status <invocation_id>` to poll an existing inv
 
 ```bash
 bb projects list
-bb sessions create --proxies --advanced-stealth --region us-east-1
+bb sessions create --proxies --verified --region us-east-1
 bb sessions create --solve-captchas --context-id ctx_abc --persist
 bb sessions get <session_id>
 bb sessions downloads get <session_id> --output session-artifacts.zip
