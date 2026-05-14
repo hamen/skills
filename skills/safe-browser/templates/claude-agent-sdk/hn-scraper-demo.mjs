@@ -56,6 +56,9 @@ function normalizeHost(url) {
 //   "blocked-scheme"   — content-bearing schemes that bypass host allowlists entirely
 //                        (data:, blob:, javascript:, file:, etc.) — must be blocked.
 //   "check-host"       — http(s) URLs: defer to the host allowlist.
+// Exact-match on "about:blank" is intentional: about:blank?foo and about:blank#bar
+// are treated as blocked-scheme rather than allowed-internal so a crafted
+// about:blank-prefixed URL can't sneak through as "internal".
 function classifyUrlScheme(url) {
   if (url === "about:blank") return "allowed-internal";
   let parsed;
@@ -218,18 +221,53 @@ async function setupBrowser() {
   await installFetchInterception(cdp, "page:initial");
 
   // Cover popups, target="_blank" navigations, and window.open(): a new page
-  // is its own CDP target whose requests would otherwise escape interception.
-  // We close the popup immediately and log it — the safe-browser policy does
-  // not allow secondary windows for the demo's threat model.
+  // is its own CDP target whose requests would otherwise escape the
+  // page-scoped Fetch.enable above. The safe-browser policy does not permit
+  // secondary windows for this threat model, so we close them.
+  //
+  // Caveat: this is best-effort, not a deterministic firewall extension.
+  // `context.on("page")` fires after the new target already exists; between
+  // event dispatch and our Fetch.enable acknowledgement the popup can issue
+  // its initial document request on an un-intercepted session. We install
+  // Fetch.enable on the new target as defense-in-depth (so anything that
+  // hasn't left the session yet is paused at our handler), capture the real
+  // post-commit URL for the audit log instead of "about:blank", then close.
+  // For a stricter contract, see the note in SKILL.md about
+  // `Target.setAutoAttach({ waitForDebuggerOnStart: true })`.
   context.on("page", async (newPage) => {
     if (newPage === page) return;
-    const popupUrl = newPage.url();
+
+    let popupSession = null;
+    try {
+      popupSession = await context.newCDPSession(newPage);
+      await installFetchInterception(popupSession, "popup");
+    } catch {
+      // The popup may already be gone; keep going so we still audit-log it.
+    }
+
+    let popupUrl = newPage.url();
+    try {
+      const navigated = await Promise.race([
+        newPage.waitForEvent("framenavigated", { timeout: 500 }),
+        new Promise((res) => setTimeout(() => res(null), 500)),
+      ]);
+      if (navigated && typeof navigated.url === "function") {
+        const committed = navigated.url();
+        if (committed && committed !== "about:blank") popupUrl = committed;
+      } else {
+        const current = newPage.url();
+        if (current && current !== "about:blank") popupUrl = current;
+      }
+    } catch {
+      // Best-effort; popupUrl falls back to the about:blank-at-creation value.
+    }
+
     auditLog.push({
       time: new Date().toISOString(),
       requestId: null,
       url: popupUrl,
       resourceType: "Document",
-      cdpEvent: "Page.popupOpened",
+      cdpEvent: "safeBrowser.secondaryPageOpened",
       host: null,
       verdict: "blocked",
       reason: "Secondary window blocked by safe-browser policy",
@@ -538,10 +576,25 @@ try {
   );
   const finalHost = normalizeHost(page.url());
 
+  // Prove the scheme + host invariants, not just "something got blocked":
+  // every audit entry that ended with verdict "allowed" must be either
+  // about:blank (allowed-internal) or an http(s) request whose host is on the
+  // allowlist. Anything else means a scheme bypass slipped through.
+  const stealthAllowed = auditLog.find(
+    (entry) =>
+      entry.verdict === "allowed" &&
+      entry.reason !== "Internal browser URL (about:blank)" &&
+      entry.host !== "news.ycombinator.com"
+  );
+
   assert(allowedHnNavigation, "Expected an allowed HN navigation in the audit log.");
   assert(frontPageExtract?.storyCount > 0, "Expected at least one extracted HN story.");
   assert(commentsExtract?.commentCount >= 0, "Expected comments extraction to run.");
   assert(blockedExternal, "Expected one blocked off-domain request.");
+  assert(
+    !stealthAllowed,
+    `Audit log contained an unexpected allowed entry (scheme or host bypass): ${JSON.stringify(stealthAllowed)}.`
+  );
   assert(finalHost === "news.ycombinator.com", `Expected final browser host to stay on HN, got ${finalHost}.`);
 
   console.log("PASS safe-browser Hacker News demo");

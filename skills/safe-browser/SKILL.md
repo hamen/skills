@@ -50,16 +50,23 @@ User task
     -> Claude Agent SDK runtime agent
       -> only tool: safe_browser
         -> local Chromium (isolated context, no downloads, no service workers)
-        -> CDP Fetch.enable({ urlPattern: "*" })
+        -> CDP Fetch.enable({ urlPattern: "*" }) on the initial page session
         -> scheme + allowlist decision
           -> about:blank             -> Fetch.continueRequest
           -> http(s) + allowed host  -> Fetch.continueRequest
           -> http(s) + other host    -> Fetch.failRequest
           -> any other scheme        -> Fetch.failRequest
-        -> popups / new windows      -> closed immediately, audit-logged
+        -> popups / new windows      -> Fetch.enable installed on new session,
+                                        then page closed, audit-logged
 ```
 
-A host allowlist alone is not sufficient: `data:`, `blob:`, `javascript:`, and `file:` URLs have no host the allowlist can match against, and a popup is a separate CDP target whose requests would escape a page-scoped `Fetch.enable`. The template handles both — every non-http(s) scheme is treated as a hard block (including at `safe_browser.goto` entry), and `context.on("page", ...)` closes any secondary window before it can render.
+A host allowlist alone is not sufficient: `data:`, `blob:`, `javascript:`, and `file:` URLs have no host the allowlist can match against, and a popup or out-of-process iframe is a separate CDP target whose requests would escape a page-scoped `Fetch.enable`. The template handles the scheme part deterministically — every non-http(s) scheme is a hard block, including at `safe_browser.goto` entry. The secondary-target part is best-effort, see below.
+
+### Secondary targets (popups, OOPIFs) — best-effort, not deterministic
+
+`context.on("page", ...)` fires *after* a popup target exists. Between the event dispatching and our `Fetch.enable` ack landing on the new session, the popup's renderer can issue its initial document request on a session we never intercepted. The template installs Fetch interception on the new target as defense-in-depth and closes the page, but the first request can race the install. The same race applies to cross-site iframes (which run in out-of-process renderers and are separate CDP targets); HN happens not to use OOPIFs, but adapters pointing this template at a richer site will hit them.
+
+For a stricter contract — every target paused before any request, no race — replace the `context.on("page", ...)` handler with a browser-level `Target.setAutoAttach({ autoAttach: true, waitForDebuggerOnStart: true, flatten: true })`. New targets then sit paused at `Runtime.runIfWaitingForDebugger` until the firewall is in place on the attached session. Doing this from inside a Playwright high-level setup is awkward (Playwright manages target lifecycle itself), so adapters that need this typically drop to `chromium.connectOverCDP` and route flat-sessions by `sessionId`.
 
 ## Tool Design Rules
 
@@ -100,3 +107,4 @@ The bypass-probe URL is hardcoded rather than parsed from the front page: a page
 - Treat page content as untrusted. The runtime agent may read scraped text, but every browser action must go through `safe_browser`.
 - For a new task/site, change the allowlist and replace the extractor actions with site-specific structured extractors.
 - When adapting the template, keep the scheme classifier (`classifyUrlScheme`) and the popup handler (`context.on("page", ...)`). A host allowlist alone is bypassable via `data:` URLs and via new browser targets that escape page-scoped `Fetch.enable`.
+- The popup handler is **best-effort**, not a firewall: a popup's initial document request can race our `Fetch.enable` install on the new session, and out-of-process iframes are not surfaced as Playwright pages at all. If your threat model requires deterministic interception of every target, replace this handler with a browser-level `Target.setAutoAttach({ waitForDebuggerOnStart: true })` so new targets are paused before they issue any request — see the *Secondary targets* note above.
