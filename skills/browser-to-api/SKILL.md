@@ -86,8 +86,8 @@ The report is a self-contained HTML file (no server needed) that shows each disc
 | `--run <path>` | yes | Path to a `browser-trace` run directory |
 | `--out <path>` | no | Output dir; default `<run>/api-spec/` |
 | `--bodies <path>` | no | `browse network` capture dir to join into the trace (auto-detected from `<run>/cdp/network/bodies/` when present) |
-| `--include <regex>` | no | Only include URLs matching regex (repeatable) |
-| `--exclude <regex>` | no | Exclude URLs matching regex (repeatable; in addition to defaults) |
+| `--include <substring>` | no | Only include URLs containing this literal substring (repeatable) |
+| `--exclude <substring>` | no | Exclude URLs containing this literal substring (repeatable; in addition to defaults) |
 | `--origins <list>` | no | Comma-separated origin allow-list (e.g. `api.example.com,example.com`) |
 | `--format <yaml\|json\|both>` | no | Output format. Default `both` |
 | `--title <string>` | no | OpenAPI `info.title`. Default derived from primary origin |

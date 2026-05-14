@@ -47,7 +47,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.error(`usage: discover.mjs --run <path> [--out <dir>] [--bodies <path>]
-                       [--include <re>]... [--exclude <re>]...
+                       [--include <substring>]... [--exclude <substring>]...
                        [--origins <list>] [--format yaml|json|both]
                        [--title <s>] [--redact <list>] [--min-samples <n>]
                        [--stage load|filter|normalize|infer|emit]

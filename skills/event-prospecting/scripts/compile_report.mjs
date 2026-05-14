@@ -907,6 +907,6 @@ console.error(JSON.stringify({
 console.log(join(dir, 'index.html'));
 
 if (shouldOpen) {
-  const { execSync } = await import('child_process');
-  try { execSync(`open "${join(dir, 'index.html')}"`); } catch {}
+  const { execFileSync } = await import('child_process');
+  try { execFileSync('open', [join(dir, 'index.html')], { stdio: 'ignore' }); } catch {}
 }

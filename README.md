@@ -1,5 +1,7 @@
 # Browserbase Skills
 
+> **Security-hardened fork:** this fork contains local security fixes applied after a strict review of the Browserbase skills. The changes harden shell execution, path handling, cookie-sync defaults, prompt templating, regex filtering, generated reports/clients, and secret-handling documentation. This is not the upstream `browserbase/skills` repository.
+
 A set of skills for enabling **[Claude Code](https://docs.claude.com/en/docs/claude-code/overview)** to work with Browserbase through browser automation and the official `bb` CLI.
 
 ## Skills

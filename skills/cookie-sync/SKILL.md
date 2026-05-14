@@ -28,34 +28,34 @@ cd .claude/skills/cookie-sync && npm install
 
 ## Usage
 
-### Basic — sync all cookies
-
-```bash
-node .claude/skills/cookie-sync/scripts/cookie-sync.mjs
-```
-
-Creates a persistent context with all your Chrome cookies. Outputs a context ID.
-
-### Filter by domain — only sync specific sites
+### Basic — sync only specific sites
 
 ```bash
 node .claude/skills/cookie-sync/scripts/cookie-sync.mjs --domains google.com,github.com
 ```
 
-Matches the domain and all subdomains (e.g. `google.com` matches `accounts.google.com`, `mail.google.com`, etc.)
+Creates a persistent context with cookies only for the requested domains. Matches the domain and all subdomains (e.g. `google.com` matches `accounts.google.com`, `mail.google.com`, etc.). The command fails closed if neither `--domains` nor the explicit dangerous `--all-domains` flag is provided.
+
+### Advanced / dangerous — sync all cookies
+
+```bash
+node .claude/skills/cookie-sync/scripts/cookie-sync.mjs --all-domains
+```
+
+⚠️ This uploads **all local Chrome cookies** to a Browserbase cloud context. Use only when you understand the credential exposure risk.
 
 ### Refresh cookies in an existing context
 
 ```bash
-node .claude/skills/cookie-sync/scripts/cookie-sync.mjs --context ctx_abc123
+node .claude/skills/cookie-sync/scripts/cookie-sync.mjs --domains google.com,github.com --context ctx_abc123
 ```
 
-Re-injects fresh cookies into a previously created context. Use this when cookies have expired.
+Re-injects fresh cookies for the selected domains into a previously created context. Use this when cookies have expired.
 
 ### Advanced stealth mode
 
 ```bash
-node .claude/skills/cookie-sync/scripts/cookie-sync.mjs --stealth
+node .claude/skills/cookie-sync/scripts/cookie-sync.mjs --domains google.com --stealth
 ```
 
 Enables Browserbase's advanced stealth mode to reduce bot detection. Recommended for sites like Google that fingerprint browsers.
@@ -63,7 +63,7 @@ Enables Browserbase's advanced stealth mode to reduce bot detection. Recommended
 ### Residential proxy with geolocation
 
 ```bash
-node .claude/skills/cookie-sync/scripts/cookie-sync.mjs --proxy "San Francisco,CA,US"
+node .claude/skills/cookie-sync/scripts/cookie-sync.mjs --domains google.com --proxy "San Francisco,CA,US"
 ```
 
 Routes through a residential proxy in the specified location. Format: `"City,ST,Country"` (state is 2-letter code). Helps match your local IP's geolocation so auth cookies aren't rejected.

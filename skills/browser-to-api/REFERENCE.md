@@ -154,8 +154,8 @@ Internals (matched in `lib/io.mjs` + `load.mjs`):
 | `--run <path>` | required | Resolves `cdp/network/{requests,responses}.jsonl` underneath |
 | `--out <path>` | `<run>/api-spec` | |
 | `--bodies <path>` | auto | `browse network` capture dir to join into the trace. Auto-detected from `<run>/cdp/network/bodies/` when present |
-| `--include <regex>` | none | Repeatable. ORed together. Applied after `--origins` |
-| `--exclude <regex>` | (defaults) | Repeatable. Combined with built-in defaults |
+| `--include <substring>` | none | Repeatable literal substring match. ORed together. Applied after `--origins` |
+| `--exclude <substring>` | (defaults) | Repeatable literal substring match. Combined with built-in defaults |
 | `--origins <list>` | none | Comma-separated. If set, anything *not* matching is dropped before include/exclude |
 | `--format <yaml\|json\|both>` | `both` | Format of the emitted spec |
 | `--title <string>` | derived | `info.title` in the OpenAPI doc |
@@ -242,7 +242,7 @@ These extensions are stripped from `report.md` (which is human-facing) but prese
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `paired.jsonl` is empty | trace contains no `Network.requestWillBeSent` events for XHR/Fetch | re-run `browser-trace` exercising the dynamic flows; static-only sites won't yield endpoints |
-| `openapi.yaml` has only `paths: {}` | every paired request was filtered out | check `--origins` and the default exclude list; pass `--include '.*'` to bypass filtering |
+| `openapi.yaml` has only `paths: {}` | every paired request was filtered out | check `--origins` and the default exclude list; pass `--include 'api.example.com'` or another literal URL substring to rescue matching traffic |
 | Path templating collapses too aggressively | numeric IDs being misread as enums, or dictionary words misread as slugs | add `--exclude` for the noisy paths and re-run, or file an issue with the trace |
 | Schemas show `type: "string"` for everything | request/response bodies aren't valid JSON or weren't captured | check `paired.jsonl` for `reqBody`/`respBody` content — if `null`, bodies weren't in the trace |
 | Spec validator complains about `info.version` | derived version is `0.1.0-discovered` which some tools dislike | pass `--version 0.1.0` (TODO) or post-edit the file |

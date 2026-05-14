@@ -34,11 +34,26 @@ my-function/
 └── .env            # Add credentials here
 ```
 
-### 2. Add Credentials to .env
+### 2. Configure Environment
+
+Prefer runtime environment variables (exported in your shell or supplied by your secret manager) instead of persisting long-lived credentials in the project directory.
+
+If your local workflow requires a `.env` file, do **not** append blindly. First verify `.env` is ignored, create it with restrictive permissions, then edit it manually:
 
 ```bash
-echo "BROWSERBASE_API_KEY=$BROWSERBASE_API_KEY" >> .env
-echo "BROWSERBASE_PROJECT_ID=$BROWSERBASE_PROJECT_ID" >> .env
+# Verify .env is ignored before placing secrets in the repo directory
+grep -qxF ".env" .gitignore || echo ".env" >> .gitignore
+
+touch .env
+chmod 600 .env
+$EDITOR .env
+```
+
+Add or update exactly these lines manually:
+
+```dotenv
+BROWSERBASE_API_KEY=your_api_key
+BROWSERBASE_PROJECT_ID=your_project_id
 ```
 
 ### 3. Install Dependencies

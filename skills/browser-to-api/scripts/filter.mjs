@@ -40,8 +40,21 @@ export function filter(outDir, opts = {}) {
   //   2. User --exclude always wins (explicit user intent).
   //   3. Default excludes can be rescued by --include (REFERENCE.md contract).
   //   4. When --include is set, anything that doesn't match it is dropped.
-  const userExcludeRes = exclude.map(s => new RegExp(s));
-  const includeRes = include.map(s => new RegExp(s));
+  const normalizeFilter = (s) => {
+    const value = String(s || '');
+    if (!value) return null;
+    if (value.length > 256) {
+      console.warn(`Filter too long (max 256 chars): ${value}, ignoring`);
+      return null;
+    }
+    return value;
+  };
+
+  // User-provided filters are literal substrings, not regular expressions.
+  // This avoids ReDoS entirely while preserving the common CLI use case
+  // (`--include api.example.com`, `--exclude /analytics`).
+  const userExcludes = exclude.map(normalizeFilter).filter(Boolean);
+  const includes = include.map(normalizeFilter).filter(Boolean);
   const originSet = new Set(origins);
 
   const paired = readJsonl(intermediatePath(outDir, 'paired.jsonl'));
@@ -49,17 +62,19 @@ export function filter(outDir, opts = {}) {
   let droppedOrigin = 0, droppedExclude = 0, droppedInclude = 0;
 
   for (const row of paired) {
+    if (row.url.length > 4096) { droppedExclude++; continue; }
+
     if (originSet.size) {
       const host = row.origin ? new URL(row.origin).host : '';
       const matched = [...originSet].some(o => host === o || host.endsWith('.' + o));
       if (!matched) { droppedOrigin++; continue; }
     }
-    if (userExcludeRes.some(re => re.test(row.url))) { droppedExclude++; continue; }
+    if (userExcludes.some(pattern => row.url.includes(pattern))) { droppedExclude++; continue; }
 
-    const matchesInclude = includeRes.length > 0 && includeRes.some(re => re.test(row.url));
+    const matchesInclude = includes.length > 0 && includes.some(pattern => row.url.includes(pattern));
     const matchesDefaultExclude = DEFAULT_EXCLUDES.some(re => re.test(row.url));
     if (matchesDefaultExclude && !matchesInclude) { droppedExclude++; continue; }
-    if (includeRes.length && !matchesInclude) { droppedInclude++; continue; }
+    if (includes.length && !matchesInclude) { droppedInclude++; continue; }
 
     out.push(row);
   }

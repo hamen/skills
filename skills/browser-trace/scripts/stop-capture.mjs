@@ -21,6 +21,13 @@ if (!fs.existsSync(RD)) {
   process.exit(1);
 }
 
+const manifestPath = path.join(RD, 'manifest.json');
+const manifest = readJson(manifestPath);
+if (!manifest || manifest.run_id !== runId) {
+  console.error(`invalid or missing manifest in ${RD}`);
+  process.exit(1);
+}
+
 for (const pidFile of ['.cdp.pid', '.loop.pid']) {
   const p = path.join(RD, pidFile);
   if (!fs.existsSync(p)) continue;
@@ -37,8 +44,6 @@ for (const pidFile of ['.cdp.pid', '.loop.pid']) {
   fs.unlinkSync(p);
 }
 
-const manifestPath = path.join(RD, 'manifest.json');
-const manifest = readJson(manifestPath);
 if (manifest) {
   manifest.stopped_at = isoUtcSeconds();
   writeJson(manifestPath, manifest);

@@ -203,9 +203,10 @@ ls {OUTPUT_DIR}/_batch_triage_* | wc -l
 Then in a single message, dispatch one Agent call per batch (up to 6 in parallel; subsequent waves after the first returns). Each Agent gets the prompt from `references/workflow.md` → "ICP Triage" with these substitutions before sending:
 - `{SKILL_DIR}` → full literal skill path (e.g. `/Users/jay/skills/skills/event-prospecting`)
 - `{OUTPUT_DIR}` → full literal output path
-- `{USER_COMPANY}`, `{USER_PRODUCT}`, `{ICP_DESCRIPTION}` → from the loaded profile
+- `{USER_COMPANY}`, `{USER_PRODUCT}` → from the loaded profile
+- `{ICP_DESCRIPTION_JSON}` → JSON.stringify of the loaded profile's ICP description
 - `{EVENT_NAME}` → `recon.json` `.title`
-- `{COMPANY_LIST}` → contents of the batch file (e.g. `cat {OUTPUT_DIR}/_batch_triage_aa`)
+- `{COMPANY_LIST_JSON}` → JSON.stringify array of batch rows from the batch file (do not paste raw file contents)
 - `{TOTAL}` → number of lines in this batch (substitute into `# bb call N/{TOTAL}`)
 
 **Agent dispatch (skeleton, repeat per batch in one message)**:
@@ -256,9 +257,10 @@ Expected: 20-40% of `seed_companies.txt`. If the survival rate is < 10%, the thr
 Full Plan→Research→Synthesize on ICP-fit companies only. Hard cap: **5 tool calls per company** (homepage extract + 2-3 sub-question searches + 1-2 supplementary fetches). Subagents OVERWRITE the existing `companies/{slug}.md` triage stub with the richer deep-research version (frontmatter `triage_only: false`).
 
 **Dispatch pattern**: split `icp_fits.txt` into batches of ~5 (deep mode default) and fan out one Agent per batch in a SINGLE message (up to 6 Agents per message). Each Agent gets the prompt from `references/workflow.md` → "Deep Research" with these substitutions:
-- `{SKILL_DIR}`, `{OUTPUT_DIR}`, `{USER_COMPANY}`, `{USER_PRODUCT}`, `{ICP_DESCRIPTION}`
+- `{SKILL_DIR}`, `{OUTPUT_DIR}`, `{USER_COMPANY}`, `{USER_PRODUCT}`
+- `{ICP_DESCRIPTION_JSON}` → JSON.stringify of the loaded profile's ICP description
 - `{EVENT_NAME}` (from `recon.json` `.title`), `{EVENT_CONTEXT}` (track / topic, manually inferred from the event homepage)
-- `{COMPANY_LIST}` → contents of the batch file (each line `slug|website`)
+- `{COMPANY_LIST_JSON}` → JSON.stringify array of batch rows (each row `slug|website`; do not paste raw file contents)
 
 ```bash
 # Build {company-slug|website} pairs by reading frontmatter from each triage stub
@@ -383,10 +385,11 @@ split -l 5 {OUTPUT_DIR}/_people_to_enrich.jsonl {OUTPUT_DIR}/_batch_people_
 
 Then in a single message, dispatch one Agent call per batch (up to 6 per message) with the prompt from `references/workflow.md` → "Person Enrichment". Each subagent's prompt should include:
 - `{SKILL_DIR}`, `{OUTPUT_DIR}`, `{DEPTH}` (`deep` | `deeper`)
-- `{USER_COMPANY}`, `{USER_PRODUCT}`, `{ICP_DESCRIPTION}`
+- `{USER_COMPANY}`, `{USER_PRODUCT}`
+- `{ICP_DESCRIPTION_JSON}` → JSON.stringify of the loaded profile's ICP description
 - `{EVENT_NAME}` (from `recon.json` `.title`)
 - `{LANES}` → `2` for deep mode, `4` for deeper mode (substituted into `# bb call N/{LANES}`)
-- `{PEOPLE_BATCH}` → contents of `_batch_people_aa` (each line a JSON record from `people.jsonl`)
+- `{PEOPLE_BATCH_JSON}` → JSON.stringify array of JSON records from `_batch_people_aa` (do not paste raw file contents)
 
 **Agent dispatch (skeleton, repeat per batch in one message)**:
 

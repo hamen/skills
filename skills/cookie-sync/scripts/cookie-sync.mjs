@@ -6,9 +6,9 @@
 //   cd skills/cookie-sync && npm install
 //
 // Usage:
-//   node scripts/cookie-sync.mjs                                        # sync all cookies into a new context
 //   node scripts/cookie-sync.mjs --domains google.com,github.com        # only sync cookies for these domains
-//   node scripts/cookie-sync.mjs --context ctx_abc123                   # refresh cookies in an existing context
+//   node scripts/cookie-sync.mjs --domains google.com --context ctx_abc123 # refresh cookies in an existing context
+//   node scripts/cookie-sync.mjs --all-domains                          # explicitly sync all cookies (dangerous)
 //   node scripts/cookie-sync.mjs --stealth                              # enable advanced stealth mode
 //   node scripts/cookie-sync.mjs --proxy "San Francisco,CA,US"          # use residential proxy with geolocation
 //
@@ -25,7 +25,7 @@
 import { Stagehand } from '@browserbasehq/stagehand';
 import Browserbase from '@browserbasehq/sdk';
 import { readFileSync, existsSync } from 'fs';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { resolve } from 'path';
 
@@ -35,11 +35,13 @@ import { resolve } from 'path';
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const result = { domains: [], contextId: null, stealth: false, proxy: null };
+  const result = { domains: [], allDomains: false, contextId: null, stealth: false, proxy: null };
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--domains' && args[i + 1]) {
       result.domains = args[++i].split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+    } else if (args[i] === '--all-domains') {
+      result.allDomains = true;
     } else if (args[i] === '--context' && args[i + 1]) {
       result.contextId = args[++i];
     } else if (args[i] === '--stealth') {
@@ -170,7 +172,7 @@ function checkChromeVersion() {
   ];
   for (const p of chromePaths) {
     try {
-      const out = execSync(`"${p}" --version`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+      const out = execFileSync(p, ['--version'], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
       const match = out.match(/(\d+)\./);
       if (match) {
         const major = parseInt(match[1], 10);
@@ -223,6 +225,11 @@ function toCookieParams(cookies) {
 // ---------------------------------------------------------------------------
 
 async function main() {
+  if (CLI.domains.length === 0 && !CLI.allDomains) {
+    console.error('Error: You must specify --domains <list> (e.g. google.com,github.com) or explicitly pass --all-domains (WARNING: uploads ALL local cookies).');
+    process.exit(1);
+  }
+
   checkChromeVersion();
 
   // Step 1: Connect to local Chrome via Stagehand and export cookies
@@ -244,6 +251,8 @@ async function main() {
   const cookies = filterCookies(allCookies, CLI.domains);
   if (CLI.domains.length > 0) {
     console.log(`Filtered to ${cookies.length} cookies matching: ${CLI.domains.join(', ')}`);
+  } else {
+    console.log(`Preparing to sync ALL ${cookies.length} local cookies to cloud context`);
   }
   if (cookies.length === 0) {
     console.warn('Warning: No cookies to sync. Check your domain filters or Chrome login state.');

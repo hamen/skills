@@ -54,5 +54,6 @@ export function intermediatePath(outDir, name) {
 }
 
 export function samplePath(outDir, method, pathHash) {
-  return path.join(outDir, 'samples', `${method.toLowerCase()}__${pathHash}.json`);
+  const safeMethod = String(method).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return path.join(outDir, 'samples', `${safeMethod}__${pathHash}.json`);
 }

@@ -12,7 +12,15 @@ export function runRoot() {
 }
 
 export function runDir(runId) {
-  return path.join(runRoot(), runId);
+  if (!/^[A-Za-z0-9._-]+$/.test(runId)) {
+    throw new Error(`Invalid runId: ${runId}`);
+  }
+  const root = path.resolve(runRoot());
+  const dir = path.resolve(root, runId);
+  if (!dir.startsWith(root)) {
+    throw new Error('Path traversal detected');
+  }
+  return dir;
 }
 
 export function ensureDir(p) {

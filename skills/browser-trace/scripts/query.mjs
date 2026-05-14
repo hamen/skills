@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { runDir, readJson, readJsonl, isTopNav } from './lib.mjs';
+import { runDir, readJson, readJsonl, isTopNav, BUCKETS } from './lib.mjs';
 
 const [runId, cmd, ...args] = process.argv.slice(2);
 if (!runId || !cmd) usage();
@@ -62,13 +62,29 @@ function usage() {
   process.exit(2);
 }
 
+function pagesRoot() {
+  return path.resolve(cdpDir, 'pages');
+}
+
 function pageDir(pid) {
-  return path.join(cdpDir, 'pages', String(pid).padStart(3, '0'));
+  const pidString = String(pid);
+  if (!/^\d+$/.test(pidString)) {
+    throw new Error(`invalid page id: ${pid}`);
+  }
+  const root = pagesRoot();
+  const dir = path.resolve(root, pidString.padStart(3, '0'));
+  if (!dir.startsWith(root + path.sep)) {
+    throw new Error(`invalid page path for page id: ${pid}`);
+  }
+  return dir;
 }
 
 function listPids(filter) {
-  if (filter && filter !== 'all') return [Number(filter)];
-  const root = path.join(cdpDir, 'pages');
+  if (filter && filter !== 'all') {
+    if (!/^\d+$/.test(String(filter))) { console.error(`invalid page id: ${filter}`); process.exit(2); }
+    return [Number(filter)];
+  }
+  const root = pagesRoot();
   if (!fs.existsSync(root)) return [];
   return fs.readdirSync(root)
     .filter(d => /^\d+$/.test(d))
@@ -112,7 +128,9 @@ function cmdSummary() {
 
 function cmdPage(pidArg, bucketArg) {
   if (pidArg === undefined) { console.error('page id required'); process.exit(2); }
-  const pdir = pageDir(pidArg);
+  let pdir;
+  try { pdir = pageDir(pidArg); }
+  catch (e) { console.error(e.message); process.exit(2); }
   if (!fs.existsSync(pdir)) { console.error(`no such page: ${pidArg}`); process.exit(1); }
 
   if (!bucketArg) {
@@ -127,6 +145,11 @@ function cmdPage(pidArg, bucketArg) {
     if (!fs.existsSync(raw)) { console.error('(empty)'); return; }
     process.stdout.write(fs.readFileSync(raw));
     return;
+  }
+
+  const validBuckets = new Set(BUCKETS.map(b => b[0]));
+  if (!validBuckets.has(bucketArg)) {
+    console.error(`invalid bucket: ${bucketArg}`); process.exit(2);
   }
 
   const file = path.join(pdir, `${bucketArg}.jsonl`);

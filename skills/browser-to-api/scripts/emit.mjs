@@ -8,6 +8,7 @@ import path from 'node:path';
 import { readJsonl, writeJson, writeText, intermediatePath, readJson } from './lib/io.mjs';
 import { structuralHash } from './lib/schema-merge.mjs';
 import { toYaml } from './lib/yaml.mjs';
+import { makeRedactor } from './lib/redact.mjs';
 
 function confidenceBucket(ep) {
   const s = ep.sampleCount;
@@ -193,11 +194,11 @@ function defaultDescriptionFor(status) {
 
 function makeOpId(ep) {
   if (ep.operationName) {
-    return `${ep.method.toLowerCase()}_${ep.operationName.replace(/[^A-Za-z0-9]/g, '_')}`;
+    return `${ep.method.toLowerCase().replace(/[^a-z0-9]/g, '')}_${ep.operationName.replace(/[^A-Za-z0-9]/g, '_')}`;
   }
   const parts = ep.path.split('/').filter(Boolean).map(s => s.replace(/[{}]/g, ''));
   const tail = parts.map(p => p.replace(/[^A-Za-z0-9]/g, '_')).join('_');
-  return `${ep.method.toLowerCase()}_${tail || 'root'}`;
+  return `${ep.method.toLowerCase().replace(/[^a-z0-9]/g, '')}_${tail || 'root'}`;
 }
 
 export function emit(outDir, opts = {}) {
@@ -296,6 +297,18 @@ export function emit(outDir, opts = {}) {
   // report.md
   const redaction = readJson(intermediatePath(outDir, 'redaction-stats.json'), { headers: 0, bodyKeys: 0, bodyValues: 0 });
 
+  const usedNames = new Set(['request', 'defaultHeaders', 'BASE']);
+  for (const ep of kept) {
+    let baseName = ep.operationName ? toFnName(ep.operationName) : makeRestFnName(ep);
+    let finalName = baseName;
+    let i = 2;
+    while (usedNames.has(finalName)) {
+      finalName = `${baseName}${i++}`;
+    }
+    usedNames.add(finalName);
+    ep.fnName = finalName;
+  }
+
   // client.mjs — generated SDK wrapping each operation as a callable function
   const clientCode = buildClient({ kept, servers });
   if (clientCode) {
@@ -320,9 +333,24 @@ export function emit(outDir, opts = {}) {
 // Client SDK generation
 // ---------------------------------------------------------------------------
 
+const RESERVED_WORDS = new Set(['do', 'if', 'in', 'for', 'let', 'new', 'try', 'var', 'case', 'else', 'enum', 'eval', 'null', 'this', 'true', 'void', 'with', 'await', 'break', 'catch', 'class', 'const', 'false', 'super', 'throw', 'while', 'yield', 'delete', 'export', 'import', 'public', 'return', 'static', 'switch', 'typeof', 'default', 'extends', 'finally', 'package', 'private', 'continue', 'debugger', 'function', 'arguments', 'interface', 'protected', 'implements', 'instanceof']);
+
 function toFnName(name) {
   // Autocomplete → autocomplete, RestaurantsAvailability → restaurantsAvailability
-  return name[0].toLowerCase() + name.slice(1);
+  let safeName = String(name).replace(/[^a-zA-Z0-9_$]/g, '');
+  if (!safeName) return 'fn';
+  if (/^[0-9]/.test(safeName)) safeName = '_' + safeName;
+  safeName = safeName[0].toLowerCase() + safeName.slice(1);
+  if (RESERVED_WORDS.has(safeName)) return safeName + '_fn';
+  return safeName;
+}
+
+function makeRestFnName(ep) {
+  let fnName = makeOpId(ep).replace(/^(get|post|put|patch|delete)_/, (_, m) => m).replace(/[^a-zA-Z0-9_$]/g, '');
+  if (!fnName) fnName = 'fn';
+  if (/^[0-9]/.test(fnName)) fnName = '_' + fnName;
+  if (RESERVED_WORDS.has(fnName)) return fnName + '_fn';
+  return fnName;
 }
 
 function extractObservedHeaders(kept) {
@@ -353,15 +381,12 @@ function extractObservedHeaders(kept) {
   }
   // Keep headers present in >50% of requests (likely required)
   const result = {};
+  const redactor = makeRedactor();
   for (const [, c] of candidates) {
     if (c.count <= totalSamples * 0.5) continue;
-    if (c.values.size <= 5) {
-      result[c.name] = [...c.values][0];
-    } else {
-      // High cardinality (e.g. CSRF tokens, correlation IDs) — include with a
-      // representative value. The header is likely required even if the value varies.
-      result[c.name] = [...c.values][0];
-    }
+    const rawValue = [...c.values][0];
+    const redactedObj = redactor.redactHeaders({ [c.name]: rawValue });
+    result[c.name] = redactedObj[c.name];
   }
   return result;
 }
@@ -378,14 +403,14 @@ function buildClient({ kept, servers }) {
 
   const lines = [];
   lines.push(`// Auto-generated API client from browser-trace capture.`);
-  lines.push(`// Usage: import { ${operations.slice(0, 3).map(e => toFnName(e.operationName)).join(', ')}${operations.length > 3 ? ', ...' : ''} } from './client.mjs';\n`);
+  lines.push(`// Usage: import { ${operations.slice(0, 3).map(e => e.fnName).join(', ')}${operations.length > 3 ? ', ...' : ''} } from './client.mjs';\n`);
   lines.push(`const BASE = '${baseUrl}';\n`);
 
   lines.push(`const defaultHeaders = {`);
   lines.push(`  'Content-Type': 'application/json',`);
   lines.push(`  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',`);
   for (const [k, v] of Object.entries(observedHeaders)) {
-    lines.push(`  '${k}': '${v}',`);
+    lines.push(`  ${JSON.stringify(k)}: ${JSON.stringify(v)},`);
   }
   lines.push(`};\n`);
 
@@ -420,20 +445,9 @@ function buildClient({ kept, servers }) {
       const isPersisted = ops.some(op =>
         op.requestExample?.extensions?.persistedQuery?.sha256Hash);
 
-      if (isPersisted) {
-        // Build a hash lookup table
-        lines.push(`// Persisted query hashes for ${parentPath}`);
-        lines.push(`const HASHES = {`);
-        for (const op of ops) {
-          const hash = op.requestExample?.extensions?.persistedQuery?.sha256Hash;
-          if (hash) lines.push(`  ${op.operationName}: '${hash}',`);
-        }
-        lines.push(`};\n`);
-      }
-
       // Emit a function per operation
       for (const op of ops) {
-        const fnName = toFnName(op.operationName);
+        const fnName = op.fnName;
         const vars = op.requestExample?.variables;
         const varKeys = vars && typeof vars === 'object' ? Object.keys(vars) : [];
 
@@ -449,21 +463,24 @@ function buildClient({ kept, servers }) {
         lines.push(` * @returns {Promise<object>}`);
         lines.push(` */`);
 
-        lines.push(`export async function ${fnName}(variables = {}) {`);
+        lines.push(`export async function ${fnName}(variables = {}, options = {}) {`);
         if (isPersisted) {
-          lines.push(`  return request('${parentPath}', {`);
+          const hash = op.requestExample?.extensions?.persistedQuery?.sha256Hash || '';
+          lines.push(`  return request(${JSON.stringify(parentPath)}, {`);
           lines.push(`    method: 'POST',`);
-          lines.push(`    query: { optype: 'query', opname: '${op.operationName}' },`);
+          lines.push(`    query: { optype: 'query', opname: ${JSON.stringify(op.operationName)} },`);
           lines.push(`    body: {`);
-          lines.push(`      operationName: '${op.operationName}',`);
+          lines.push(`      operationName: ${JSON.stringify(op.operationName)},`);
           lines.push(`      variables,`);
-          lines.push(`      extensions: { persistedQuery: { version: 1, sha256Hash: HASHES.${op.operationName} } },`);
+          lines.push(`      extensions: { persistedQuery: { version: 1, sha256Hash: ${JSON.stringify(hash)} } },`);
           lines.push(`    },`);
+          lines.push(`    ...options,`);
           lines.push(`  });`);
         } else {
-          lines.push(`  return request('${parentPath}', {`);
+          lines.push(`  return request(${JSON.stringify(parentPath)}, {`);
           lines.push(`    method: 'POST',`);
-          lines.push(`    body: { ${op.discriminatorField || 'operationName'}: '${op.operationName}', variables },`);
+          lines.push(`    body: { ${JSON.stringify(op.discriminatorField || 'operationName')}: ${JSON.stringify(op.operationName)}, variables },`);
+          lines.push(`    ...options,`);
           lines.push(`  });`);
         }
         lines.push(`}\n`);
@@ -473,12 +490,12 @@ function buildClient({ kept, servers }) {
 
   // Regular REST endpoints
   for (const ep of regular) {
-    const fnName = makeOpId(ep).replace(/^(get|post|put|patch|delete)_/, (_, m) => m);
+    let fnName = ep.fnName;
     const hasBody = ['POST', 'PUT', 'PATCH'].includes(ep.method) && ep.requestBodyKnown;
 
     lines.push(`export async function ${fnName}(${hasBody ? 'body, ' : ''}options = {}) {`);
-    lines.push(`  return request('${ep.path}', {`);
-    lines.push(`    method: '${ep.method}',`);
+    lines.push(`  return request(${JSON.stringify(ep.path)}, {`);
+    lines.push(`    method: ${JSON.stringify(ep.method)},`);
     if (hasBody) lines.push(`    body,`);
     lines.push(`    ...options,`);
     lines.push(`  });`);
@@ -501,7 +518,7 @@ function buildReport({ kept, dropped, servers, redaction, minSamples, hasClient 
   // Quick-start with generated client
   if (hasClient) {
     const allFns = [...operations, ...regular];
-    const fnNames = allFns.map(e => e.operationName ? toFnName(e.operationName) : makeOpId(e));
+    const fnNames = allFns.map(e => e.fnName);
     lines.push('## Quick start\n');
     lines.push('```js');
     lines.push(`import { ${fnNames.join(', ')} } from './client.mjs';`);
@@ -527,9 +544,9 @@ function buildReport({ kept, dropped, servers, redaction, minSamples, hasClient 
         const body = JSON.stringify(ep.requestExample, null, 2);
         const curlPath = ep.parentPath || ep.path;
         lines.push('```bash');
-        lines.push(`curl -X ${ep.method} '${baseUrl}${curlPath}' \\`);
+        lines.push(`curl -X ${ep.method.replace(/[^a-zA-Z0-9_-]/g, '')} '${(baseUrl + curlPath).replace(/'/g, "'\\''")}' \\`);
         lines.push(`  -H 'Content-Type: application/json' \\`);
-        lines.push(`  -d '${body}'`);
+        lines.push(`  -d '${body.replace(/'/g, "'\\''")}'`);
         lines.push('```\n');
       }
 
@@ -582,9 +599,9 @@ function buildReport({ kept, dropped, servers, redaction, minSamples, hasClient 
       if (ep.requestExample) {
         const body = JSON.stringify(ep.requestExample, null, 2);
         lines.push('```bash');
-        lines.push(`curl -X ${ep.method} '${baseUrl}${ep.path}' \\`);
+        lines.push(`curl -X ${ep.method.replace(/[^a-zA-Z0-9_-]/g, '')} '${(baseUrl + ep.path).replace(/'/g, "'\\''")}' \\`);
         lines.push(`  -H 'Content-Type: application/json' \\`);
-        lines.push(`  -d '${body}'`);
+        lines.push(`  -d '${body.replace(/'/g, "'\\''")}'`);
         lines.push('```\n');
       }
       if (ep.responseExample) {
@@ -629,7 +646,7 @@ function buildHtmlReport({ kept, servers, title, clientCode }) {
 
   const opCards = all.map((ep, i) => {
     const name = ep.operationName || `${ep.method} ${ep.path}`;
-    const fnName = ep.operationName ? toFnName(ep.operationName) : null;
+    const fnName = ep.fnName;
     const vars = ep.requestExample?.variables;
     const varRows = vars && typeof vars === 'object'
       ? Object.entries(vars).map(([k, v]) => {
@@ -670,10 +687,10 @@ function buildHtmlReport({ kept, servers, title, clientCode }) {
         <h4>Client usage</h4>
         <pre><code>import { ${escHtml(fnName)} } from './client.mjs';
 
-const result = await ${escHtml(fnName)}(${vars ? JSON.stringify(Object.fromEntries(Object.entries(vars).filter(([,v]) => v !== '<redacted>').slice(0, 4).map(([k, v]) => {
+const result = await ${escHtml(fnName)}(${vars ? escHtml(JSON.stringify(Object.fromEntries(Object.entries(vars).filter(([,v]) => v !== '<redacted>').slice(0, 4).map(([k, v]) => {
           if (Array.isArray(v) && v.length > 2) return [k, v.slice(0, 2)];
           return [k, v];
-        })), null, 2) : '{}'});</code></pre>` : ''}
+        })), null, 2)) : '{}'});</code></pre>` : ''}
 
         ${reqBody ? `
         <h4>Request body</h4>
